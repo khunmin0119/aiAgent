@@ -146,7 +146,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
         if not os.path.exists(image_path):
             return [types.TextContent(
                 type="text",
-                text=result + f"""❌ **오류: 이미지 파일을 찾을 수 없습니다**
+                text=result + f""" **오류: 이미지 파일을 찾을 수 없습니다**
 
 경로: {image_path}
 
@@ -196,7 +196,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
             nodes = []
             node_labels = [chr(65 + i) for i in range(len(circles))]
             
-            result += f"✅ {len(circles)}개 절점 자동 검출\n\n"
+            result += f" {len(circles)}개 절점 자동 검출\n\n"
             result += "| 절점 | X (픽셀) | Y (픽셀) |\n"
             result += "|------|----------|----------|\n"
             
@@ -208,7 +208,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
         except Exception as e:
             return [types.TextContent(
                 type="text",
-                text=result + f"❌ 절점 검출 오류: {str(e)}\n"
+                text=result + f"절점 검출 오류: {str(e)}\n"
             )]
         
         # 4단계: 부재 연결 검출
@@ -220,7 +220,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
             if lines is None or len(lines) == 0:
                 return [types.TextContent(
                     type="text",
-                    text=result + "❌ 부재 연결을 검출할 수 없습니다.\n"
+                    text=result + "부재 연결을 검출할 수 없습니다.\n"
                 )]
             
             # 선분을 절점에 매칭
@@ -251,7 +251,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
                               for m in members):
                         members.append(Member(member_id, start_node.id, end_node.id, None))
             
-            result += f"✅ {len(members)}개 부재 연결 추출\n\n"
+            result += f"{len(members)}개 부재 연결 추출\n\n"
             result += "| 부재 | 시작 | 끝 |\n"
             result += "|------|------|----|\n"
             for member in members:
@@ -260,7 +260,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
         except Exception as e:
             return [types.TextContent(
                 type="text",
-                text=result + f"❌ 부재 검출 오류: {str(e)}\n"
+                text=result + f"부재 검출 오류: {str(e)}\n"
             )]
         
         # 5단계: 정역학 해석
@@ -292,7 +292,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
             analyzer.infer_member_types()
             analyzer.infer_node_types()
             
-            result += "✅ 정역학 평형방정식 해결 완료\n\n"
+            result += "정역학 평형방정식 해결 완료\n\n"
             result += "| 부재 | 부재력 (kN) | 종류 |\n"
             result += "|------|-------------|------|\n"
             
@@ -305,7 +305,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
         except Exception as e:
             return [types.TextContent(
                 type="text",
-                text=result + f"❌ 부재력 계산 오류: {str(e)}\n\n```\n{traceback.format_exc()}\n```\n"
+                text=result + f"부재력 계산 오류: {str(e)}\n\n```\n{traceback.format_exc()}\n```\n"
             )]
         
         # 6단계: 절점 형식
@@ -349,7 +349,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
             results = checker.verify_stm()
             df = checker.generate_node_table()
             
-            result += "✅ KDS 기준 강도 검증 완료\n\n"
+            result += "KDS 기준 강도 검증 완료\n\n"
             
             # 표 형식 결과
             if not df.empty:
@@ -360,9 +360,9 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
             # 최종 판정
             result += "\n\n## 최종 판정\n\n"
             if results['overall']:
-                result += "✅ **합격** - 모든 부재가 설계 기준을 만족합니다.\n"
+                result += "**합격** - 모든 부재가 설계 기준을 만족합니다.\n"
             else:
-                result += "❌ **불합격** - 일부 부재가 설계 기준을 만족하지 못합니다.\n\n"
+                result += "**불합격** - 일부 부재가 설계 기준을 만족하지 못합니다.\n\n"
                 result += "### 불만족 부재\n\n"
                 failed = df[df['판정'] == '불만족']
                 if not failed.empty:
@@ -370,7 +370,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
                     result += "\n"
             
         except Exception as e:
-            result += f"❌ 검증 오류: {str(e)}\n\n```\n{traceback.format_exc()}\n```\n"
+            result += f"검증 오류: {str(e)}\n\n```\n{traceback.format_exc()}\n```\n"
         
         result += "\n---\n\n"
         result += f"**처리 완료** | 검증 기준: KDS 14 20 52 (2021)\n"
@@ -378,7 +378,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
         return [types.TextContent(type="text", text=result)]
         
     except Exception as e:
-        error_msg = f"""# ❌ 오류 발생
+        error_msg = f"""# 오류 발생
 
 {str(e)}
 

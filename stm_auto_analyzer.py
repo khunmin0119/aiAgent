@@ -157,13 +157,13 @@ class STMStaticAnalyzer:
         print(f"상수 벡터 b: {b.shape}\n", flush=True)
         
         if n_equations > n_unknowns:
-            print(f"⚠️ 부정정 구조 (방정식 수 > 미지수 수)", flush=True)
+            print(f"부정정 구조 (방정식 수 > 미지수 수)", flush=True)
             print(f"   최소제곱법 사용", flush=True)
             x, residuals, rank, s = lstsq(A, b)
-            print(f"✅ 최소제곱해 계산 완료 (rank: {rank})\n", flush=True)
+            print(f"최소제곱해 계산 완료 (rank: {rank})\n", flush=True)
         else:
             x = np.linalg.solve(A, b)
-            print(f"✅ 연립방정식 해 계산 완료\n", flush=True)
+            print(f"연립방정식 해 계산 완료\n", flush=True)
         
         # 결과 저장
         member_forces = {}
@@ -177,7 +177,7 @@ class STMStaticAnalyzer:
             self.reactions[node_id][react_type] = x[idx]
         
         print("="*70, flush=True)
-        print("✅ 부재력 계산 완료", flush=True)
+        print("부재력 계산 완료", flush=True)
         print("="*70, flush=True)
         
         return member_forces
@@ -264,6 +264,6 @@ class STMStaticAnalyzer:
         ax.legend()
         plt.tight_layout()
         
-        print(f"\n✅ 시각화 저장: {save_path}", flush=True)
+        print(f"\n 시각화 저장: {save_path}", flush=True)
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         plt.close()

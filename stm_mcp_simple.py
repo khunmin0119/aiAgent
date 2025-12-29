@@ -75,10 +75,10 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
 - 보 높이: {beam_height}mm
 - fck: {fck}MPa
 
-## 자동 처리 완료 ✅
+## 자동 처리 완료
 
 ### 1단계: 절점 추출
-✅ 6개 절점 자동 검출
+6개 절점 자동 검출
 
 | 절점 | X (mm) | Y (mm) |
 |------|--------|--------|
@@ -90,7 +90,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
 | H | 1500 | 100 |
 
 ### 2단계: 부재 연결
-✅ 8개 부재 연결 추출
+8개 부재 연결 추출
 
 | 부재 | 시작 | 끝 |
 |------|------|-----|
@@ -104,7 +104,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
 | GH | G | H |
 
 ### 3단계: 부재력 계산
-✅ 정역학 평형방정식 해결 완료
+정역학 평형방정식 해결 완료
 
 | 부재 | 부재력 (kN) | 종류 |
 |------|-------------|------|
@@ -115,7 +115,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
 | GH | 2318.6 | Tie (인장) |
 
 ### 4단계: 절점 형식 결정
-✅ 자동 판단 완료
+자동 판단 완료
 
 | 절점 | 형식 | βn | 의미 |
 |------|------|-----|------|
@@ -124,7 +124,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
 | G | CTT | 0.6 | 1압축+2인장 |
 
 ### 5단계: 강도 검증
-✅ KDS 기준 검증 완료
+KDS 기준 검증 완료
 
 | 절점 | 절점종류 | βn | 부재종류 | 부재력(kN) | 요구된 폭(mm) | 실제 폭(mm) | 판정 | 보완 |
 |------|---------|-----|---------|-----------|-------------|------------|------|------|
@@ -136,7 +136,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
 | | | | BG | 2,000.0 | 290.5 | 1000.0 | 만족 | |
 
 ## 최종 판정
-✅ **합격** - 모든 부재가 설계 기준을 만족합니다.
+**합격** - 모든 부재가 설계 기준을 만족합니다.
 
 ---
 
@@ -147,7 +147,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[types.Text
         return [types.TextContent(type="text", text=result)]
         
     except Exception as e:
-        error_msg = f"# ❌ 오류 발생\n\n```\n{str(e)}\n\n{traceback.format_exc()}\n```"
+        error_msg = f"# 오류 발생\n\n```\n{str(e)}\n\n{traceback.format_exc()}\n```"
         return [types.TextContent(type="text", text=error_msg)]
 
 async def main():

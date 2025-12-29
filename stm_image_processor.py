@@ -26,7 +26,7 @@ class STMImageProcessor:
         else:
             self.gray = self.image.copy()
         
-        print(f"✅ 이미지 로드 완료: {self.image.shape}", flush=True)
+        print(f"[OK] Image loaded: {self.image.shape}", flush=True)
         
     def detect_circles(self, min_radius=5, max_radius=50, param2=20):
         """원형 절점 검출"""
@@ -46,7 +46,7 @@ class STMImageProcessor:
         
         if circles is not None:
             circles = np.round(circles[0, :]).astype("int")
-            print(f"✅ 검출된 원(절점): {len(circles)}개", flush=True)
+            print(f"검출된 원(절점): {len(circles)}개", flush=True)
             return circles
         
         return None
@@ -68,7 +68,7 @@ class STMImageProcessor:
         )
         
         if lines is not None:
-            print(f"✅ 검출된 선(부재): {len(lines)}개", flush=True)
+            print(f"검출된 선(부재): {len(lines)}개", flush=True)
             return lines
         
         return None
