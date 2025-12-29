@@ -1,0 +1,32 @@
+# STM 설계 검증 MCP 서버 - 필수 패키지
+# Python 3.10 이상 필요 (3.10, 3.11, 3.12 모두 호환)
+
+# MCP SDK - Model Context Protocol
+mcp>=1.0.0
+
+# 수치 계산 라이브러리
+numpy>=1.24.0,<3.0.0
+scipy>=1.10.0,<2.0.0
+
+# 데이터 처리 및 표 생성
+pandas>=2.0.0,<3.0.0
+
+# 이미지 처리 (OpenCV)
+opencv-python>=4.8.0,<5.0.0
+# 또는 헤드리스 버전 (GUI 없는 서버 환경용)
+# opencv-python-headless>=4.8.0,<5.0.0
+
+# 이미지 파일 입출력
+Pillow>=10.0.0,<13.0.0
+
+# 시각화 및 그래프 생성
+matplotlib>=3.7.0,<4.0.0
+
+# Excel 파일 생성 (.xlsx)
+openpyxl>=3.1.0,<4.0.0
+
+# 참고사항:
+# - dataclasses: Python 3.7+에 기본 포함
+# - asyncio: Python 3.4+에 기본 포함
+# - json: Python 표준 라이브러리
+# - typing: Python 3.5+에 기본 포함
