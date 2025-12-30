@@ -76,170 +76,6 @@ class STMDesignChecker:
         """Add support (pin or roller)"""
         self.supports[node_id] = support_type
     
-    def get_max_connections(self, node_id: str) -> int:
-        """Get maximum allowed connections for a node"""
-        # C, D, F, G, H는 4개 연결 가능, 나머지는 3개
-        if node_id in ['C', 'D', 'F', 'G', 'H']:
-            return 4
-        else:
-            return 3
-    
-    def count_node_connections(self, node_id: str) -> int:
-        """Count current connections for a node (including support)"""
-        count = 0
-        
-        # Count member connections
-        for m in self.members.values():
-            if m.node_start == node_id or m.node_end == node_id:
-                count += 1
-        
-        # Count support as 1 connection
-        if node_id in self.supports:
-            count += 1
-        
-        return count
-    
-    def is_member_connected(self, node1: str, node2: str) -> bool:
-        """Check if two nodes are already connected"""
-        for m in self.members.values():
-            if (m.node_start == node1 and m.node_end == node2) or \
-               (m.node_start == node2 and m.node_end == node1):
-                return True
-        return False
-    
-    def auto_connect_members(self):
-        """
-        Automatically connect members following rules:
-        1. Most nodes connect to 3 members (support counts as 1)
-        2. C, D, F, G, H can connect to 4 members
-        3. Priority: horizontal, then vertical, then diagonal (nearest)
-        """
-        node_list = list(self.nodes.keys())
-        nodes_data = [(nid, self.nodes[nid].x, self.nodes[nid].y) for nid in node_list]
-        
-        # Separate upper and lower layers
-        y_coords = [n[2] for n in nodes_data]
-        y_mid = (max(y_coords) + min(y_coords)) / 2
-        
-        upper_nodes = sorted([n for n in nodes_data if n[2] > y_mid], key=lambda x: x[1])
-        lower_nodes = sorted([n for n in nodes_data if n[2] <= y_mid], key=lambda x: x[1])
-        
-        print(f"\n[INFO] Auto-connecting members")
-        print(f"       Upper layer: {[n[0] for n in upper_nodes]}")
-        print(f"       Lower layer: {[n[0] for n in lower_nodes]}")
-        print(f"       Special nodes (4 connections allowed): C, D, F, G, H")
-        
-        # Step 1: Connect horizontal members (upper and lower chords)
-        print("\n[Step 1] Horizontal connections:")
-        for i in range(len(upper_nodes) - 1):
-            node1 = upper_nodes[i][0]
-            node2 = upper_nodes[i + 1][0]
-            
-            max1 = self.get_max_connections(node1)
-            max2 = self.get_max_connections(node2)
-            
-            if self.count_node_connections(node1) < max1 and \
-            self.count_node_connections(node2) < max2:
-                member_id = f"{node1}{node2}"
-                self.add_member(Member(member_id, node1, node2, None, None))
-                print(f"       {member_id}: {node1}({self.count_node_connections(node1)}/{max1}) - {node2}({self.count_node_connections(node2)}/{max2})")
-        
-        for i in range(len(lower_nodes) - 1):
-            node1 = lower_nodes[i][0]
-            node2 = lower_nodes[i + 1][0]
-            
-            max1 = self.get_max_connections(node1)
-            max2 = self.get_max_connections(node2)
-            
-            if self.count_node_connections(node1) < max1 and \
-            self.count_node_connections(node2) < max2:
-                member_id = f"{node1}{node2}"
-                self.add_member(Member(member_id, node1, node2, None, None))
-                print(f"       {member_id}: {node1}({self.count_node_connections(node1)}/{max1}) - {node2}({self.count_node_connections(node2)}/{max2})")
-        
-        # Step 2: Connect vertical members (directly above/below)
-        print("\n[Step 2] Vertical connections:")
-        for upper_id, upper_x, upper_y in upper_nodes:
-            for lower_id, lower_x, lower_y in lower_nodes:
-                if abs(upper_x - lower_x) < 50:  # Same x-coordinate
-                    max_upper = self.get_max_connections(upper_id)
-                    max_lower = self.get_max_connections(lower_id)
-                    
-                    if self.count_node_connections(upper_id) < max_upper and \
-                    self.count_node_connections(lower_id) < max_lower and \
-                    not self.is_member_connected(upper_id, lower_id):
-                        member_id = ''.join(sorted([upper_id, lower_id]))
-                        self.add_member(Member(member_id, upper_id, lower_id, None, None))
-                        print(f"       {member_id}: {upper_id}({self.count_node_connections(upper_id)}/{max_upper}) - {lower_id}({self.count_node_connections(lower_id)}/{max_lower})")
-        
-        # Step 3: Connect diagonal members to complete connections
-        print("\n[Step 3] Diagonal connections (completing to max):")
-        for node_id in node_list:
-            current_count = self.count_node_connections(node_id)
-            max_conn = self.get_max_connections(node_id)
-            
-            if current_count < max_conn:
-                needed = max_conn - current_count
-                node = self.nodes[node_id]
-                
-                print(f"       Node {node_id} needs {needed} more connection(s) (max={max_conn})")
-                
-                # Find nearest unconnected nodes
-                distances = []
-                for other_id, other_node in self.nodes.items():
-                    if other_id != node_id:
-                        # ★★★ A-C, D-F 연결 금지 ★★★
-                        if (node_id == 'A' and other_id == 'C') or (node_id == 'C' and other_id == 'A'):
-                            continue
-                        if (node_id == 'D' and other_id == 'F') or (node_id == 'F' and other_id == 'D'):
-                            continue
-                        
-                        if not self.is_member_connected(node_id, other_id):
-                            # Check if other node also needs connection
-                            other_count = self.count_node_connections(other_id)
-                            other_max = self.get_max_connections(other_id)
-                            if other_count < other_max:
-                                dist = np.sqrt((other_node.x - node.x)**2 + (other_node.y - node.y)**2)
-                                distances.append((other_id, dist))
-                
-                distances.sort(key=lambda x: x[1])
-                
-                added = 0
-                for other_id, dist in distances:
-                    if added >= needed:
-                        break
-                    
-                    # Double check counts before adding
-                    max_node = self.get_max_connections(node_id)
-                    max_other = self.get_max_connections(other_id)
-                    
-                    if self.count_node_connections(node_id) < max_node and \
-                    self.count_node_connections(other_id) < max_other:
-                        member_id = ''.join(sorted([node_id, other_id]))
-                        self.add_member(Member(member_id, node_id, other_id, None, None))
-                        print(f"       {member_id}: {node_id}({self.count_node_connections(node_id)}/{max_node}) - {other_id}({self.count_node_connections(other_id)}/{max_other}) [dist={dist:.0f}mm]")
-                        added += 1
-        
-        # Report final connections
-        print(f"\n[INFO] Final connection status:")
-        for node_id in sorted(node_list):
-            count = self.count_node_connections(node_id)
-            max_conn = self.get_max_connections(node_id)
-            
-            connected_to = []
-            for m in self.members.values():
-                if m.node_start == node_id:
-                    connected_to.append(m.node_end)
-                elif m.node_end == node_id:
-                    connected_to.append(m.node_start)
-            
-            support_str = ""
-            if node_id in self.supports:
-                support_str = " + support"
-            
-            status = "OK" if count == max_conn else f"WARNING({count}/{max_conn})"
-            print(f"       Node {node_id}: {count}/{max_conn} connections {connected_to}{support_str} [{status}]")
-    
     def get_member_length(self, member: Member) -> float:
         """Calculate member length"""
         n1 = self.nodes[member.node_start]
@@ -1028,8 +864,26 @@ if __name__ == "__main__":
     checker.add_node(Node('G', 1225, 125, None))
     checker.add_node(Node('H', 5675, 125, None))
     
-    # Auto-connect members (C, D, F, G, H can have 4 connections)
-    checker.auto_connect_members()
+    # Manually add members (직접 부재 추가)
+    # Upper chord (상현재)
+    checker.add_member(Member('BC', 'B', 'C', None, None))
+    checker.add_member(Member('CD', 'C', 'D', None, None))
+    checker.add_member(Member('DE', 'D', 'E', None, None))
+    
+    # Lower chord (하현재)
+    checker.add_member(Member('AG', 'A', 'G', None, None))
+    checker.add_member(Member('GH', 'G', 'H', None, None))
+    checker.add_member(Member('HF', 'H', 'F', None, None))
+    
+    # Vertical members (수직재)
+    checker.add_member(Member('BG', 'B', 'G', None, None))
+    checker.add_member(Member('EH', 'E', 'H', None, None))
+    
+    # Diagonal members (사재)
+    checker.add_member(Member('AB', 'A', 'B', None, None))
+    checker.add_member(Member('CG', 'C', 'G', None, None))
+    checker.add_member(Member('DH', 'D', 'H', None, None))
+    checker.add_member(Member('EF', 'E', 'F', None, None))
     
     # Add loads (2,000 kN at B and D)
     checker.add_load('B', 0, -2000)
