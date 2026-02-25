@@ -272,7 +272,7 @@ class GradientSTMOptimizer:
         self.node_ids = list(self.initial_nodes.keys())
         
         # ═══════════════════════════════════════════════════════════
-        # 대칭 제약 추가
+        # 대칭 제약 설정
         # ═══════════════════════════════════════════════════════════
         self.x_center = user_design.beam_length / 2  # 3450mm
         
@@ -284,7 +284,7 @@ class GradientSTMOptimizer:
             ('G', 'H')
         ]
         
-        # 좌측 노드만 최적화 변수로 사용
+        # 좌측 노드만 최적화 변수로
         self.left_nodes = ['A', 'B', 'C', 'G']
         self.right_nodes = ['F', 'E', 'D', 'H']
         
@@ -363,7 +363,7 @@ class GradientSTMOptimizer:
             print(f"Improvement: {f0 - result.fun:.2f}")
             print(f"Success: {result.success}")
         
-        # 최적화된 노드 (대칭 포함)
+        # 최적화된 노드
         optimized_nodes = self._vector_to_nodes(result.x)
         
         # 대칭 검증
@@ -380,51 +380,31 @@ class GradientSTMOptimizer:
         }
     
     def _nodes_to_vector(self, nodes):
-        """
-        Dict → vector (대칭: 좌측 노드만)
-        
-        Returns:
-            [x_A, y_A, x_B, y_B, x_C, y_C, x_G, y_G]
-            총 8개 변수 (원래 16개의 절반)
-        """
+        """좌측 노드만 벡터로 변환 (대칭)"""
         x = []
         for node_id in self.left_nodes:
             x.extend(nodes[node_id])
         return np.array(x)
     
     def _vector_to_nodes(self, x):
-        """
-        Vector → dict (대칭 적용)
-        
-        좌측 노드는 최적화 변수에서
-        우측 노드는 대칭으로 자동 계산
-        """
+        """벡터 → 노드 (대칭 적용)"""
         nodes = {}
         
         # 좌측 노드 (최적화 변수)
         for i, node_id in enumerate(self.left_nodes):
             nodes[node_id] = (x[i*2], x[i*2+1])
         
-        # 우측 노드 (대칭으로 계산)
+        # 우측 노드 (대칭 계산)
         for left_id, right_id in self.symmetric_pairs:
             x_left, y_left = nodes[left_id]
-            
-            # X: 중심선 기준 대칭
-            x_right = 2 * self.x_center - x_left
-            
-            # Y: 동일
-            y_right = y_left
-            
+            x_right = 2 * self.x_center - x_left  # 중심선 기준 대칭
+            y_right = y_left  # Y는 동일
             nodes[right_id] = (x_right, y_right)
         
         return nodes
     
     def _get_bounds(self):
-        """
-        위치 변경 범위 (좌측 노드만)
-        
-        주의: 좌측 노드는 중심선을 넘지 않도록 제한
-        """
+        """좌측 노드 경계 (중심선 제한)"""
         bounds = []
         
         max_dx = self.max_change_ratio * self.user_design.beam_length
@@ -433,7 +413,7 @@ class GradientSTMOptimizer:
         for node_id in self.left_nodes:
             x0, y0 = self.initial_nodes[node_id]
             
-            # X 범위 (좌측 노드: 중심선 넘지 않음)
+            # X 범위 (중심선 넘지 않음)
             x_min = max(0, x0 - max_dx)
             x_max = min(self.x_center, x0 + max_dx)  # 중심선이 상한
             bounds.append((x_min, x_max))
@@ -489,50 +469,6 @@ class GradientSTMOptimizer:
         
         return cost
     
-    def _verify_symmetry(self, nodes):
-        """
-        대칭 검증
-        
-        좌우 노드가 완벽하게 대칭인지 확인
-        """
-        print(f"\n{'='*60}")
-        print("Symmetry Verification")
-        print(f"{'='*60}")
-        
-        all_symmetric = True
-        
-        for left_id, right_id in self.symmetric_pairs:
-            x_left, y_left = nodes[left_id]
-            x_right, y_right = nodes[right_id]
-            
-            # 중심으로부터 거리
-            dist_left = abs(self.x_center - x_left)
-            dist_right = abs(x_right - self.x_center)
-            
-            # Y 좌표
-            y_diff = abs(y_right - y_left)
-            
-            # 대칭 오차
-            x_error = abs(dist_left - dist_right)
-            
-            print(f"{left_id} ↔ {right_id}:")
-            print(f"  Position: ({x_left:.1f}, {y_left:.1f}) ↔ ({x_right:.1f}, {y_right:.1f})")
-            print(f"  Distance from center: {dist_left:.2f}mm ↔ {dist_right:.2f}mm")
-            print(f"  Y-coordinate: {y_left:.2f}mm ↔ {y_right:.2f}mm")
-            
-            if x_error < 1e-6 and y_diff < 1e-6:
-                print(f"  ✓ Perfect symmetry")
-            else:
-                print(f"  ⚠️ Symmetry error: ΔX={x_error:.6f}mm, ΔY={y_diff:.6f}mm")
-                all_symmetric = False
-        
-        print(f"{'='*60}")
-        if all_symmetric:
-            print("✓ All nodes are perfectly symmetric!")
-        else:
-            print("⚠️ Warning: Some symmetry errors detected")
-        print(f"{'='*60}\n")
-    
     def _check_with_full_kds(self, nodes):
         """기존 STM_for_MCP.py 사용"""
         try:
@@ -583,6 +519,188 @@ class GradientSTMOptimizer:
                 'total_width': 1e10,
                 'equilibrium_error': 1e10
             }
+    
+    def _verify_symmetry(self, nodes):
+        """대칭 검증 출력"""
+        print(f"\n{'='*60}")
+        print("Symmetry Verification")
+        print(f"{'='*60}")
+        
+        all_symmetric = True
+        
+        for left_id, right_id in self.symmetric_pairs:
+            x_left, y_left = nodes[left_id]
+            x_right, y_right = nodes[right_id]
+            
+            dist_left = abs(self.x_center - x_left)
+            dist_right = abs(x_right - self.x_center)
+            y_diff = abs(y_right - y_left)
+            x_error = abs(dist_left - dist_right)
+            
+            print(f"{left_id} ↔ {right_id}:")
+            print(f"  Position: ({x_left:.1f}, {y_left:.1f}) ↔ ({x_right:.1f}, {y_right:.1f})")
+            print(f"  Distance from center: {dist_left:.2f}mm ↔ {dist_right:.2f}mm")
+            print(f"  Y-coordinate: {y_left:.2f}mm ↔ {y_right:.2f}mm")
+            
+            if x_error < 1e-6 and y_diff < 1e-6:
+                print(f"  ✓ Perfect symmetry")
+            else:
+                print(f"  ⚠️ Symmetry error: ΔX={x_error:.6f}mm, ΔY={y_diff:.6f}mm")
+                all_symmetric = False
+        
+        print(f"{'='*60}")
+        if all_symmetric:
+            print("✓ All nodes are perfectly symmetric!")
+        else:
+            print("⚠️ Warning: Some symmetry errors detected")
+        print(f"{'='*60}\n")
+    
+    def print_member_forces_comparison(self, result):
+        """부재력 전후 비교 출력"""
+        
+        print(f"\n{'='*100}")
+        print("Member Forces Comparison (Before → After)")
+        print(f"{'='*100}")
+        
+        # 초기 부재력
+        initial_forces, _ = self.checker.calculate_forces(
+            result['initial_nodes'],
+            self.connections,
+            self.user_design.loads,
+            self.user_design.supports
+        )
+        
+        # 최적화 부재력
+        optimized_forces, _ = self.checker.calculate_forces(
+            result['optimized_nodes'],
+            self.connections,
+            self.user_design.loads,
+            self.user_design.supports
+        )
+        
+        # 헤더
+        print(f"{'Member':<12} {'Type':<10} {'Initial':<12} {'Optimized':<12} {'Change':<12} {'Change %':<12}")
+        print(f"{'-'*100}")
+        
+        # 각 부재별 출력
+        for i, (n1, n2) in enumerate(self.connections):
+            member_name = f"{n1}-{n2}"
+            
+            f_initial = initial_forces[i]
+            f_optimized = optimized_forces[i]
+            change = f_optimized - f_initial
+            change_pct = (change / f_initial * 100) if abs(f_initial) > 1e-6 else 0
+            
+            member_type = "Tie" if f_optimized > 0 else "Strut"
+            
+            print(f"{member_name:<12} {member_type:<10} "
+                  f"{abs(f_initial):>10.1f}kN {abs(f_optimized):>10.1f}kN "
+                  f"{change:>+10.1f}kN {change_pct:>+10.1f}%")
+        
+        print(f"{'-'*100}")
+        
+        # 통계
+        print(f"\nStatistics:")
+        print(f"  Total members: {len(self.connections)}")
+        
+        tie_mask = optimized_forces > 0
+        if np.any(tie_mask):
+            tie_initial = np.abs(initial_forces[tie_mask])
+            tie_optimized = np.abs(optimized_forces[tie_mask])
+            tie_reduction = np.mean((tie_initial - tie_optimized) / tie_initial * 100)
+            print(f"  Ties: {np.sum(tie_mask)} members")
+            print(f"    Average reduction: {tie_reduction:.1f}%")
+        
+        strut_mask = optimized_forces < 0
+        if np.any(strut_mask):
+            strut_initial = np.abs(initial_forces[strut_mask])
+            strut_optimized = np.abs(optimized_forces[strut_mask])
+            strut_reduction = np.mean((strut_initial - strut_optimized) / strut_initial * 100)
+            print(f"  Struts: {np.sum(strut_mask)} members")
+            print(f"    Average reduction: {strut_reduction:.1f}%")
+        
+        all_initial = np.abs(initial_forces)
+        all_optimized = np.abs(optimized_forces)
+        overall_reduction = np.mean((all_initial - all_optimized) / all_initial * 100)
+        print(f"  Overall average reduction: {overall_reduction:.1f}%")
+        
+        print(f"{'='*100}\n")
+    
+    def print_member_forces_by_category(self, result):
+        """카테고리별 부재력 출력"""
+        
+        print(f"\n{'='*100}")
+        print("Member Forces by Category")
+        print(f"{'='*100}")
+        
+        # 부재력 계산
+        initial_forces, _ = self.checker.calculate_forces(
+            result['initial_nodes'],
+            self.connections,
+            self.user_design.loads,
+            self.user_design.supports
+        )
+        
+        optimized_forces, _ = self.checker.calculate_forces(
+            result['optimized_nodes'],
+            self.connections,
+            self.user_design.loads,
+            self.user_design.supports
+        )
+        
+        # 분류
+        ties = []
+        struts = []
+        
+        for i, (n1, n2) in enumerate(self.connections):
+            member_name = f"{n1}-{n2}"
+            f_initial = initial_forces[i]
+            f_optimized = optimized_forces[i]
+            change = f_optimized - f_initial
+            change_pct = (change / f_initial * 100) if abs(f_initial) > 1e-6 else 0
+            
+            data = {
+                'name': member_name,
+                'initial': abs(f_initial),
+                'optimized': abs(f_optimized),
+                'change': change,
+                'change_pct': change_pct
+            }
+            
+            if f_optimized > 0:
+                ties.append(data)
+            else:
+                struts.append(data)
+        
+        # Ties 출력
+        print(f"\n[TIES - Tension Members]")
+        print(f"{'-'*100}")
+        print(f"{'Member':<12} {'Initial':<12} {'Optimized':<12} {'Change':<12} {'Change %':<12}")
+        print(f"{'-'*100}")
+        for tie in ties:
+            print(f"{tie['name']:<12} {tie['initial']:>10.1f}kN {tie['optimized']:>10.1f}kN "
+                  f"{tie['change']:>+10.1f}kN {tie['change_pct']:>+10.1f}%")
+        
+        if ties:
+            avg_reduction = np.mean([t['change_pct'] for t in ties])
+            print(f"{'-'*100}")
+            print(f"Average reduction: {avg_reduction:.1f}%")
+        
+        # Struts 출력
+        print(f"\n[STRUTS - Compression Members]")
+        print(f"{'-'*100}")
+        print(f"{'Member':<12} {'Initial':<12} {'Optimized':<12} {'Change':<12} {'Change %':<12}")
+        print(f"{'-'*100}")
+        for strut in struts:
+            print(f"{strut['name']:<12} {strut['initial']:>10.1f}kN {strut['optimized']:>10.1f}kN "
+                  f"{strut['change']:>+10.1f}kN {strut['change_pct']:>+10.1f}%")
+        
+        if struts:
+            avg_reduction = np.mean([s['change_pct'] for s in struts])
+            print(f"{'-'*100}")
+            print(f"Average reduction: {avg_reduction:.1f}%")
+        
+        print(f"\n{'='*100}\n")
     
     def plot_comparison(self, result, save_path=None):
         """최적화 전후 비교 - 기본 버전"""
@@ -847,6 +965,166 @@ class GradientSTMOptimizer:
         ]
         ax.legend(handles=color_legend, loc='upper left', fontsize=10, title='Movement Range')
     
+    def print_member_forces_comparison(self, result):
+        """
+        부재력 전후 비교 출력
+        
+        터미널에 깔끔한 표 형식으로 출력
+        """
+        
+        print(f"\n{'='*100}")
+        print("Member Forces Comparison (Before → After)")
+        print(f"{'='*100}")
+        
+        # 초기 부재력 계산
+        initial_forces, _ = self.checker.calculate_forces(
+            result['initial_nodes'],
+            self.connections,
+            self.user_design.loads,
+            self.user_design.supports
+        )
+        
+        # 최적화 부재력 계산
+        optimized_forces, _ = self.checker.calculate_forces(
+            result['optimized_nodes'],
+            self.connections,
+            self.user_design.loads,
+            self.user_design.supports
+        )
+        
+        # 헤더
+        print(f"{'Member':<12} {'Type':<10} {'Initial':<12} {'Optimized':<12} {'Change':<12} {'Change %':<12}")
+        print(f"{'-'*100}")
+        
+        # 각 부재별 출력
+        for i, (n1, n2) in enumerate(self.connections):
+            member_name = f"{n1}-{n2}"
+            
+            f_initial = initial_forces[i]
+            f_optimized = optimized_forces[i]
+            change = f_optimized - f_initial
+            change_pct = (change / f_initial * 100) if abs(f_initial) > 1e-6 else 0
+            
+            # 부재 타입 판단
+            if f_optimized > 0:
+                member_type = "Tie"
+            else:
+                member_type = "Strut"
+            
+            print(f"{member_name:<12} {member_type:<10} "
+                  f"{abs(f_initial):>10.1f}kN {abs(f_optimized):>10.1f}kN "
+                  f"{change:>+10.1f}kN {change_pct:>+10.1f}%")
+        
+        print(f"{'-'*100}")
+        
+        # 통계
+        print(f"\nStatistics:")
+        print(f"  Total members: {len(self.connections)}")
+        
+        # Tie 통계
+        tie_mask = optimized_forces > 0
+        if np.any(tie_mask):
+            tie_initial = np.abs(initial_forces[tie_mask])
+            tie_optimized = np.abs(optimized_forces[tie_mask])
+            tie_reduction = np.mean((tie_initial - tie_optimized) / tie_initial * 100)
+            print(f"  Ties: {np.sum(tie_mask)} members")
+            print(f"    Average reduction: {tie_reduction:.1f}%")
+        
+        # Strut 통계
+        strut_mask = optimized_forces < 0
+        if np.any(strut_mask):
+            strut_initial = np.abs(initial_forces[strut_mask])
+            strut_optimized = np.abs(optimized_forces[strut_mask])
+            strut_reduction = np.mean((strut_initial - strut_optimized) / strut_initial * 100)
+            print(f"  Struts: {np.sum(strut_mask)} members")
+            print(f"    Average reduction: {strut_reduction:.1f}%")
+        
+        # 전체 평균
+        all_initial = np.abs(initial_forces)
+        all_optimized = np.abs(optimized_forces)
+        overall_reduction = np.mean((all_initial - all_optimized) / all_initial * 100)
+        print(f"  Overall average reduction: {overall_reduction:.1f}%")
+        
+        print(f"{'='*100}\n")
+    
+    def print_member_forces_by_category(self, result):
+        """
+        부재를 카테고리별로 분류하여 출력
+        """
+        
+        print(f"\n{'='*100}")
+        print("Member Forces by Category")
+        print(f"{'='*100}")
+        
+        # 부재력 계산
+        initial_forces, _ = self.checker.calculate_forces(
+            result['initial_nodes'],
+            self.connections,
+            self.user_design.loads,
+            self.user_design.supports
+        )
+        
+        optimized_forces, _ = self.checker.calculate_forces(
+            result['optimized_nodes'],
+            self.connections,
+            self.user_design.loads,
+            self.user_design.supports
+        )
+        
+        # 카테고리 분류
+        ties = []
+        struts = []
+        
+        for i, (n1, n2) in enumerate(self.connections):
+            member_name = f"{n1}-{n2}"
+            f_initial = initial_forces[i]
+            f_optimized = optimized_forces[i]
+            change = f_optimized - f_initial
+            change_pct = (change / f_initial * 100) if abs(f_initial) > 1e-6 else 0
+            
+            data = {
+                'name': member_name,
+                'initial': abs(f_initial),
+                'optimized': abs(f_optimized),
+                'change': change,
+                'change_pct': change_pct
+            }
+            
+            if f_optimized > 0:
+                ties.append(data)
+            else:
+                struts.append(data)
+        
+        # Ties 출력
+        print(f"\n[TIES - Tension Members]")
+        print(f"{'-'*100}")
+        print(f"{'Member':<12} {'Initial':<12} {'Optimized':<12} {'Change':<12} {'Change %':<12}")
+        print(f"{'-'*100}")
+        for tie in ties:
+            print(f"{tie['name']:<12} {tie['initial']:>10.1f}kN {tie['optimized']:>10.1f}kN "
+                  f"{tie['change']:>+10.1f}kN {tie['change_pct']:>+10.1f}%")
+        
+        if ties:
+            avg_reduction = np.mean([t['change_pct'] for t in ties])
+            print(f"{'-'*100}")
+            print(f"Average reduction: {avg_reduction:.1f}%")
+        
+        # Struts 출력
+        print(f"\n[STRUTS - Compression Members]")
+        print(f"{'-'*100}")
+        print(f"{'Member':<12} {'Initial':<12} {'Optimized':<12} {'Change':<12} {'Change %':<12}")
+        print(f"{'-'*100}")
+        for strut in struts:
+            print(f"{strut['name']:<12} {strut['initial']:>10.1f}kN {strut['optimized']:>10.1f}kN "
+                  f"{strut['change']:>+10.1f}kN {strut['change_pct']:>+10.1f}%")
+        
+        if struts:
+            avg_reduction = np.mean([s['change_pct'] for s in struts])
+            print(f"{'-'*100}")
+            print(f"Average reduction: {avg_reduction:.1f}%")
+        
+        print(f"\n{'='*100}\n")
+    
     def _plot_stm(self, ax, nodes, title):
         """
         STM 플롯
@@ -1073,6 +1351,18 @@ if __name__ == "__main__":
         print(f"  Initial:   ({x0:7.1f}, {y0:7.1f})")
         print(f"  Optimized: ({x1:7.1f}, {y1:7.1f})")
         print(f"  Change:    ({dx:+7.1f}, {dy:+7.1f})")
+    
+    # ═══════════════════════════════════════════════════════════
+    # 부재력 비교 출력 ⭐⭐⭐
+    # ═══════════════════════════════════════════════════════════
+    
+    # 기본 비교 표
+    optimizer.print_member_forces_comparison(result)
+    
+    # 카테고리별 상세 표
+    optimizer.print_member_forces_by_category(result)
+    
+    # ═══════════════════════════════════════════════════════════
     
     # 시각화
     # 기본 비교 (간단)
