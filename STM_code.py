@@ -62,7 +62,7 @@ class STMDesignChecker:
         
     def add_node(self, node: Node):
         """Add node"""
-        self.nodes[node.id] = node
+        self.nodes[node.id] = node # node.id == Node.id를 의미하는 듯함
         
     def add_member(self, member: Member):
         """Add member"""

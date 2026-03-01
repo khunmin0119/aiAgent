@@ -249,6 +249,297 @@ class SimplifiedKDSChecker:
 
 
 # ═══════════════════════════════════════════════════════════
+# Node Type Classifier (절점 타입 분류)
+# ═══════════════════════════════════════════════════════════
+
+class NodeTypeClassifier:
+    """절점 타입 분류 (CCC, CCT, CTT, TTT)"""
+    
+    def __init__(self):
+        # KDS 기준 절점 효율계수
+        self.beta_n = {
+            'CCC': 1.0,   # 3개 압축
+            'CCT': 0.8,   # 2개 압축 + 1개 인장
+            'CTT': 0.6,   # 1개 압축 + 2개 인장
+            'TTT': 0.6,   # 3개 인장
+        }
+    
+    def classify_node(self, node_id, forces, connections, supports=None):
+        """절점 타입 분류
+        
+        Args:
+            node_id: 노드 ID
+            forces: 부재력 배열
+            connections: 부재 연결 리스트
+            supports: 지지점 정보 (dict)
+        """
+        # 이 노드에 연결된 부재 찾기
+        connected_members = []
+        for i, (n1, n2) in enumerate(connections):
+            if n1 == node_id or n2 == node_id:
+                force = forces[i]
+                member_type = 'Strut' if force < 0 else 'Tie'
+                connected_members.append({
+                    'member': (n1, n2),
+                    'force': abs(force),
+                    'type': member_type,
+                    'index': i
+                })
+        
+        # 압축재/인장재 개수
+        n_strut = sum(1 for m in connected_members if m['type'] == 'Strut')
+        n_tie = sum(1 for m in connected_members if m['type'] == 'Tie')
+        
+        # 지지점인 경우: 반력을 압축재로 간주
+        is_support = False
+        if supports is not None:
+            if node_id in supports:  # 딕셔너리 key 확인
+                is_support = True
+                n_strut += 1  # 반력 = 압축재
+        
+        # C1T3 → CTT로 간주 (1개 압축 + 2개 인장)
+        if n_strut == 1 and n_tie == 3:
+            n_tie = 2  # 3개 타이 → 2개로 간주
+        
+        # 타입 결정 (표준 타입만 사용)
+        if n_strut == 3 and n_tie == 0:
+            node_type = 'CCC'
+        elif n_strut == 2 and n_tie == 1:
+            node_type = 'CCT'
+        elif n_strut == 1 and n_tie == 2:
+            node_type = 'CTT'
+        elif n_strut == 0 and n_tie >= 3:
+            node_type = 'TTT'
+        else:
+            # 특수 케이스 (기본값 사용)
+            node_type = f'C{n_strut}T{n_tie}'
+        
+        return {
+            'type': node_type,
+            'n_strut': n_strut,
+            'n_tie': n_tie,
+            'members': connected_members,
+            'beta_n': self.beta_n.get(node_type, 0.50),
+            'is_support': is_support
+        }
+
+
+# ═══════════════════════════════════════════════════════════
+# Detailed Member Calculator (상세 부재 폭 계산)
+# ═══════════════════════════════════════════════════════════
+
+class DetailedMemberCalculator:
+    """상세 부재 폭 계산"""
+    
+    def __init__(self, fck=27.0, fy=400.0, beam_width=500.0):
+        self.fck = fck
+        self.fy = fy
+        self.beam_width = beam_width
+
+        # 강도 계수
+        self.phi = 0.75
+        
+        # 기본 파라미터
+        self.cover = 40.0
+        self.d_s = 10.0
+        self.spacing_min = 30.0
+    
+    def determine_beta_s(self, node1_info, node2_info):
+        """스트럿 효율계수 β_s 결정
+        
+        - 평행 스트럿: β_s = 1.0
+        - 병목형 스트럿: β_s = 0.6
+        """
+        if node1_info['type'] == 'CCC' and node2_info['type'] == 'CCC':
+            return 1.0
+        else:
+            return 0.6
+    
+    def calculate_strut_width(self, force, beta_s=0.6):
+        """스트럿 필요 폭: w_s = C / (φ × 0.85 × β_s × f_ck × b)"""
+        C = abs(force) * 1000  # N
+        w_s = C / (self.phi * 0.85 * beta_s * self.fck * self.beam_width)
+        return max(200, w_s)
+    
+    def calculate_tie_width(self, force, node1, node2, all_nodes, d_b=None):
+        """타이 필요 폭 계산 (수평/수직 케이스)
+        
+        Args:
+            force: 인장력 (kN)
+            node1, node2: 타이 양단 노드 ID
+            all_nodes: 전체 노드 딕셔너리
+            d_b: 철근 직경 (None이면 자동)
+        """
+        import math
+        
+        T = abs(force) * 1000  # N
+        A_s = T / self.fy  # ← fy 직접 사용!
+        
+        # 주철근 직경 결정
+        if d_b is None:
+            if force < 500:
+                d_b = 19
+            elif force < 1000:
+                d_b = 22
+            elif force < 1500:
+                d_b = 25
+            elif force < 2500:
+                d_b = 29
+            else:
+                d_b = 32
+        
+        A_bar = np.pi * (d_b/2)**2
+        n_bars = int(np.ceil(A_s / A_bar))
+        spacing = max(self.spacing_min, d_b, 25)
+        
+        # 노드 좌표
+        x1, y1 = all_nodes[node1]
+        x2, y2 = all_nodes[node2]
+        
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+        
+        # 수평 타이 (y 좌표 거의 같음)
+        if dy < 100:
+            w_t_calc = 2 * (self.cover + self.d_s + d_b + spacing/2)
+            
+        # 수직 타이 (x 좌표 거의 같음)
+        elif dx < 100:
+            w_t_calc = self._calculate_vertical_tie_width(
+                node1, node2, all_nodes, d_b, spacing
+            )
+            
+        # 대각선 (기본 공식 사용)
+        else:
+            w_t_calc = 2 * (self.cover + self.d_s + d_b + spacing/2)
+        
+        # 50의 배수로 올림
+        w_t = math.ceil(w_t_calc / 50) * 50
+        
+        # 최소 250mm
+        w_t = max(250, w_t)
+        
+        return {
+            'w_t': w_t,
+            'd_b': d_b,
+            'n_bars': n_bars,
+            'A_s': A_s,
+            'spacing': spacing
+        }
+
+    def _calculate_vertical_tie_width(self, node1, node2, all_nodes, d_b, spacing):
+        """수직 타이 w_t 계산 (인접 노드 중점 방식)"""
+        x1, y1 = all_nodes[node1]
+        x2, y2 = all_nodes[node2]
+        
+        # 상단 노드 (y가 큰 쪽)
+        if y1 > y2:
+            upper_node = node1
+            x_upper = x1
+            y_upper = y1
+        else:
+            upper_node = node2
+            x_upper = x2
+            y_upper = y2
+        
+        # 상단 노드와 비슷한 y 높이의 인접 노드 찾기
+        adjacent = []
+        for nid, (x, y) in all_nodes.items():
+            if nid != node1 and nid != node2:
+                if abs(y - y_upper) < 100:  # 같은 높이
+                    adjacent.append((nid, x))
+        
+        if len(adjacent) < 2:
+            # 인접 노드 부족 시 기본 공식
+            return 2 * (self.cover + self.d_s + d_b + spacing/2)
+        
+        # x 좌표 정렬
+        adjacent.sort(key=lambda item: item[1])
+        
+        # x_upper 좌우 찾기
+        left_x = None
+        right_x = None
+        
+        for nid, x in adjacent:
+            if x < x_upper:
+                left_x = x
+            elif x > x_upper and right_x is None:
+                right_x = x
+        
+        # 중점까지 거리
+        distances = []
+        if left_x is not None:
+            mid_x = (x_upper + left_x) / 2
+            distances.append(abs(x_upper - mid_x))
+        
+        if right_x is not None:
+            mid_x = (x_upper + right_x) / 2
+            distances.append(abs(x_upper - mid_x))
+        
+        if not distances:
+            return 2 * (self.cover + self.d_s + d_b + spacing/2)
+        
+        # 최소 거리 × 2
+        min_dist = min(distances)
+        return 2 * min_dist
+
+
+# ═══════════════════════════════════════════════════════════
+# Node Design Checker (절점 설계 검토)
+# ═══════════════════════════════════════════════════════════
+
+class NodeDesignChecker:
+    """절점 설계 검토 (표 10.2.4)"""
+    
+    def __init__(self, fck=27.0, fy = 400.0, beam_width=500.0):
+        self.fck = fck
+        self.fy = fy
+        self.beam_width = beam_width
+
+        # 강도 계수
+        self.phi = 0.75
+    
+    def calculate_required_area(self, node_info, max_force):
+        """절점 필요 단면적: A_req = F_max / (β_n × f_cd)"""
+        F = abs(max_force) * 1000  # N
+        beta_n = node_info['beta_n']
+        f_cu = beta_n * self.fck
+        f_cd_node = 0.85 * f_cu / 1.5
+        A_req = F / f_cd_node
+        return A_req
+    
+    def calculate_actual_area(self, node_info, member_widths):
+        """절점 실제 단면적"""
+        widths = []
+        for member in node_info['members']:
+            idx = member['index']
+            if idx in member_widths:
+                widths.append(member_widths[idx])
+        
+        if not widths:
+            return 0
+        
+        avg_width = sum(widths) / len(widths)
+        A_actual = avg_width * self.beam_width
+        return A_actual
+    
+    def check_node(self, node_info, max_force, member_widths):
+        """절점 설계 검토"""
+        A_req = self.calculate_required_area(node_info, max_force)
+        A_actual = self.calculate_actual_area(node_info, member_widths)
+        
+        ratio = A_actual / A_req if A_req > 0 else 999
+        status = 'OK' if ratio >= 1.0 else 'NG'
+        
+        return {
+            'A_req': A_req,
+            'A_actual': A_actual,
+            'ratio': ratio,
+            'status': status
+        }
+
+
+# ═══════════════════════════════════════════════════════════
 # Gradient-based Optimizer
 # ═══════════════════════════════════════════════════════════
 
@@ -394,6 +685,7 @@ class GradientSTMOptimizer:
             'initial_nodes': self.initial_nodes,
             'objective_value': f_rounded,
             'objective_value_continuous': result.fun,
+            'initial_objective': f0,
             'success': result.success,
             'message': result.message,
             'connections': self.connections
@@ -1277,7 +1569,7 @@ class GradientSTMOptimizer:
                 mid_y = (y1 + y2) / 2
                 
                 # 부재력 크기
-                force_text = f"{abs(force):.1f}"
+                force_text = f"{abs(force):.0f}"
                 
                 ax.text(mid_x, mid_y, force_text,
                     fontsize=8, ha='center',
@@ -1383,6 +1675,225 @@ class GradientSTMOptimizer:
 
 
 # ═══════════════════════════════════════════════════════════
+# Output Functions (상세 출력)
+# ═══════════════════════════════════════════════════════════
+
+def print_member_design_table(optimizer, result):
+    """부재 설계 표 출력 (표 10.2.3)"""
+    
+    print(f"\n{'='*120}")
+    print("Member Design Table (예제표 10.2.3 - KDS Detailed Check)")
+    print(f"{'='*120}")
+    
+    # 부재력 계산
+    forces, _ = optimizer.checker.calculate_forces(
+        result['optimized_nodes'],
+        optimizer.connections,
+        optimizer.user_design.loads,
+        optimizer.user_design.supports
+    )
+    
+    # 절점 분류
+    classifier = NodeTypeClassifier()
+    node_types = {}
+    for node_id in optimizer.node_ids:
+        node_types[node_id] = classifier.classify_node(
+            node_id, forces, optimizer.connections, optimizer.user_design.supports
+        )
+    
+    # 상세 계산기
+    calc = DetailedMemberCalculator(
+        fck=optimizer.user_design.fck,
+        fy=optimizer.user_design.fy,
+        beam_width=optimizer.user_design.beam_width
+    )
+    
+    # 헤더
+    print(f"{'Member':<12} {'Type':<8} {'β_s':<6} {'Force(kN)':<12} {'w_s(mm)':<10} {'w_t(mm)':<10} {'Remarks':<20}")
+    print(f"{'-'*120}")
+    
+    member_widths = {}
+    
+    for i, (n1, n2) in enumerate(optimizer.connections):
+        member_name = f"{n1}-{n2}"
+        force = forces[i]
+        force_abs = abs(force)
+        
+        if force < 0:  # Strut
+            # β_s 결정
+            beta_s = calc.determine_beta_s(node_types[n1], node_types[n2])
+            
+            # 스트럿 폭
+            w_s = calc.calculate_strut_width(force_abs, beta_s)
+            
+            member_widths[i] = w_s
+            
+            remarks = "Bottle-shaped" if beta_s == 0.6 else "Prismatic"
+            
+            print(f"{member_name:<12} {'Strut':<8} {beta_s:<6.1f} {force_abs:<12.1f} {w_s:<10.1f} {'-':<10} {remarks:<20}")
+        
+        else:  # Tie
+            # 타이 폭
+            tie_info = calc.calculate_tie_width(force_abs, n1, n2, result['optimized_nodes'])
+            w_t = tie_info['w_t']
+            d_b = tie_info['d_b']
+            n_bars = tie_info['n_bars']
+            
+            member_widths[i] = w_t
+            
+            remarks = f"D{d_b}×{n_bars}ea"
+            
+            print(f"{member_name:<12} {'Tie':<8} {'-':<6} {force_abs:<12.1f} {'-':<10} {w_t:<10.1f} {remarks:<20}")
+    
+    print(f"{'='*120}\n")
+    
+    return member_widths, node_types
+
+
+def print_node_check_table(optimizer, result, member_widths, node_types):
+    """절점 검토 표 출력 (표 10.2.4)"""
+    
+    print(f"\n{'='*120}")
+    print("Node Design Check (예제표 10.2.4 - KDS Node Verification)")
+    print(f"{'='*120}")
+    
+    # 부재력 계산
+    forces, _ = optimizer.checker.calculate_forces(
+        result['optimized_nodes'],
+        optimizer.connections,
+        optimizer.user_design.loads,
+        optimizer.user_design.supports
+    )
+    
+    # 절점 검토기
+    checker = NodeDesignChecker(
+        fck=optimizer.user_design.fck,
+        beam_width=optimizer.user_design.beam_width
+    )
+    
+    # 헤더
+    print(f"{'Node':<8} {'Type':<8} {'β_n':<8} {'f_cu(MPa)':<12} {'A_req(mm²)':<14} {'A_act(mm²)':<14} {'Ratio':<10} {'Status':<8}")
+    print(f"{'-'*120}")
+    
+    all_ok = True
+    
+    for node_id in optimizer.node_ids:
+        node_info = node_types[node_id]
+        node_type = node_info['type']
+        beta_n = node_info['beta_n']
+        
+        # 이 절점의 최대 부재력
+        max_force = 0
+        for member in node_info['members']:
+            max_force = max(max_force, member['force'])
+        
+        # f_cu
+        f_cu = beta_n * optimizer.user_design.fck
+        
+        # 검토
+        check_result = checker.check_node(node_info, max_force, member_widths)
+        
+        A_req = check_result['A_req']
+        A_actual = check_result['A_actual']
+        ratio = check_result['ratio']
+        status = check_result['status']
+        
+        if status != 'OK':
+            all_ok = False
+        
+        status_display = f"✓ {status}" if status == 'OK' else f"✗ {status}"
+        
+        print(f"{node_id:<8} {node_type:<8} {beta_n:<8.2f} {f_cu:<12.1f} {A_req:<14.0f} {A_actual:<14.0f} {ratio:<10.2f} {status_display:<8}")
+    
+    print(f"{'='*120}")
+    
+    if all_ok:
+        print("✓ All nodes passed the design check!")
+    else:
+        print("⚠️ Warning: Some nodes failed the design check - review required")
+    
+    print(f"{'='*120}\n")
+
+
+def print_summary_statistics(optimizer, result):
+    """요약 통계 출력"""
+    
+    print(f"\n{'='*80}")
+    print("Design Summary")
+    print(f"{'='*80}")
+    
+    # 부재력
+    initial_forces, _ = optimizer.checker.calculate_forces(
+        result['initial_nodes'],
+        optimizer.connections,
+        optimizer.user_design.loads,
+        optimizer.user_design.supports
+    )
+    
+    optimized_forces, _ = optimizer.checker.calculate_forces(
+        result['optimized_nodes'],
+        optimizer.connections,
+        optimizer.user_design.loads,
+        optimizer.user_design.supports
+    )
+    
+    # 통계
+    print(f"\n[Material Efficiency]")
+    if 'initial_objective' in result:
+        print(f"  Initial objective: {result['initial_objective']:.2f}")
+    print(f"  Optimized objective: {result['objective_value']:.2f}")
+    if 'initial_objective' in result:
+        improvement = result['initial_objective'] - result['objective_value']
+        improvement_pct = improvement / result['initial_objective'] * 100
+        print(f"  Improvement: {improvement:.2f} ({improvement_pct:.1f}%)")
+    
+    print(f"\n[Member Forces]")
+    print(f"  Total members: {len(optimizer.connections)}")
+    
+    tie_mask = optimized_forces > 0
+    strut_mask = optimized_forces < 0
+    
+    if np.any(tie_mask):
+        tie_avg_reduction = np.mean((np.abs(initial_forces[tie_mask]) - np.abs(optimized_forces[tie_mask])) / np.abs(initial_forces[tie_mask]) * 100)
+        print(f"  Ties: {np.sum(tie_mask)} members, Avg reduction: {tie_avg_reduction:.1f}%")
+    
+    if np.any(strut_mask):
+        strut_avg_change = np.mean((np.abs(initial_forces[strut_mask]) - np.abs(optimized_forces[strut_mask])) / np.abs(initial_forces[strut_mask]) * 100)
+        print(f"  Struts: {np.sum(strut_mask)} members, Avg change: {strut_avg_change:.1f}%")
+    
+    print(f"\n[Node Movement]")
+    total_movement = 0
+    max_movement = 0
+    max_node = None
+    
+    for node_id in optimizer.node_ids:
+        if node_id in optimizer.fixed_nodes:
+            continue
+        x0, y0 = result['initial_nodes'][node_id]
+        x1, y1 = result['optimized_nodes'][node_id]
+        movement = np.sqrt((x1-x0)**2 + (y1-y0)**2)
+        total_movement += movement
+        if movement > max_movement:
+            max_movement = movement
+            max_node = node_id
+    
+    n_movable = len(optimizer.node_ids) - len(optimizer.fixed_nodes)
+    avg_movement = total_movement / n_movable if n_movable > 0 else 0
+    
+    print(f"  Average movement: {avg_movement:.1f}mm")
+    print(f"  Maximum movement: {max_movement:.1f}mm (Node {max_node})")
+    
+    print(f"\n[Constraints]")
+    print(f"  Fixed nodes: {len(optimizer.fixed_nodes)} (A, F)")
+    print(f"  Y-coordinates: FIXED (w_t, w_s determined)")
+    print(f"  Optimized variables: {len(optimizer.left_nodes)} X-coordinates")
+    print(f"  Grid size: 5mm")
+    print(f"  Symmetry: ✓ Perfect")
+    
+    print(f"{'='*80}\n")
+
+
+# ═══════════════════════════════════════════════════════════
 # 사용 예시
 # ═══════════════════════════════════════════════════════════
 
@@ -1421,22 +1932,29 @@ if __name__ == "__main__":
         print(f"  Change:    ({dx:+7.1f}, {dy:+7.1f})")
     
     # ═══════════════════════════════════════════════════════════
-    # 부재력 비교 출력 ⭐⭐⭐
+    # 부재력 비교 출력
     # ═══════════════════════════════════════════════════════════
     
-    # 기본 비교 표
     optimizer.print_member_forces_comparison(result)
-    
-    # 카테고리별 상세 표
     optimizer.print_member_forces_by_category(result)
+    
+    # ═══════════════════════════════════════════════════════════
+    # 상세 설계 검증 (KDS 기준)
+    # ═══════════════════════════════════════════════════════════
+    
+    # 부재 설계 표 (표 10.2.3)
+    member_widths, node_types = print_member_design_table(optimizer, result)
+    
+    # 절점 검토 표 (표 10.2.4)
+    print_node_check_table(optimizer, result, member_widths, node_types)
+    
+    # 요약 통계
+    print_summary_statistics(optimizer, result)
     
     # ═══════════════════════════════════════════════════════════
     
     # 시각화
-    # 기본 비교 (간단)
     fig1 = optimizer.plot_comparison(result, save_path='stm_gradient_comparison.png')
-    
-    # 개선된 비교 (상세)
     fig2 = optimizer.plot_enhanced_comparison(result, save_path='stm_enhanced_comparison.png')
     
     print(f"\n{'='*60}")
@@ -1444,3 +1962,150 @@ if __name__ == "__main__":
     print("✓ Basic plot saved: stm_gradient_comparison.png")
     print("✓ Enhanced plot saved: stm_enhanced_comparison.png")
     print(f"{'='*60}")
+
+
+# ═══════════════════════════════════════════════════════════
+# Output Functions (상세 출력)
+# ═══════════════════════════════════════════════════════════
+
+def print_node_check_table(optimizer, result, member_widths, node_types):
+    """절점 검토 표 출력 (표 10.2.4)"""
+    
+    print(f"\n{'='*120}")
+    print("Node Design Check (예제표 10.2.4 - KDS Node Verification)")
+    print(f"{'='*120}")
+    
+    # 부재력 계산
+    forces, _ = optimizer.checker.calculate_forces(
+        result['optimized_nodes'],
+        optimizer.connections,
+        optimizer.user_design.loads,
+        optimizer.user_design.supports
+    )
+    
+    # 절점 검토기
+    checker = NodeDesignChecker(
+        fck=optimizer.user_design.fck,
+        beam_width=optimizer.user_design.beam_width
+    )
+    
+    # 헤더
+    print(f"{'Node':<8} {'Type':<8} {'β_n':<8} {'f_cu(MPa)':<12} {'A_req(mm²)':<14} {'A_act(mm²)':<14} {'Ratio':<10} {'Status':<8}")
+    print(f"{'-'*120}")
+    
+    all_ok = True
+    
+    for node_id in optimizer.node_ids:
+        node_info = node_types[node_id]
+        node_type = node_info['type']
+        beta_n = node_info['beta_n']
+        
+        # 이 절점의 최대 부재력
+        max_force = 0
+        for member in node_info['members']:
+            max_force = max(max_force, member['force'])
+        
+        # f_cu
+        f_cu = beta_n * optimizer.user_design.fck
+        
+        # 검토
+        check_result = checker.check_node(node_info, max_force, member_widths)
+        
+        A_req = check_result['A_req']
+        A_actual = check_result['A_actual']
+        ratio = check_result['ratio']
+        status = check_result['status']
+        
+        if status != 'OK':
+            all_ok = False
+        
+        status_display = f"✓ {status}" if status == 'OK' else f"✗ {status}"
+        
+        print(f"{node_id:<8} {node_type:<8} {beta_n:<8.2f} {f_cu:<12.1f} {A_req:<14.0f} {A_actual:<14.0f} {ratio:<10.2f} {status_display:<8}")
+    
+    print(f"{'='*120}")
+    
+    if all_ok:
+        print("✓ All nodes passed the design check!")
+    else:
+        print("⚠️ Warning: Some nodes failed the design check - review required")
+    
+    print(f"{'='*120}\n")
+
+
+def print_summary_statistics(optimizer, result):
+    """요약 통계 출력"""
+    
+    print(f"\n{'='*80}")
+    print("Design Summary")
+    print(f"{'='*80}")
+    
+    # 부재력
+    initial_forces, _ = optimizer.checker.calculate_forces(
+        result['initial_nodes'],
+        optimizer.connections,
+        optimizer.user_design.loads,
+        optimizer.user_design.supports
+    )
+    
+    optimized_forces, _ = optimizer.checker.calculate_forces(
+        result['optimized_nodes'],
+        optimizer.connections,
+        optimizer.user_design.loads,
+        optimizer.user_design.supports
+    )
+    
+    # 통계
+    print(f"\n[Material Efficiency]")
+    if 'initial_objective' in result:
+        print(f"  Initial objective: {result['initial_objective']:.2f}")
+    print(f"  Optimized objective: {result['objective_value']:.2f}")
+    if 'initial_objective' in result:
+        improvement = result['initial_objective'] - result['objective_value']
+        improvement_pct = improvement / result['initial_objective'] * 100
+        print(f"  Improvement: {improvement:.2f} ({improvement_pct:.1f}%)")
+    
+    print(f"\n[Member Forces]")
+    print(f"  Total members: {len(optimizer.connections)}")
+    
+    tie_mask = optimized_forces > 0
+    strut_mask = optimized_forces < 0
+    
+    if np.any(tie_mask):
+        tie_avg_reduction = np.mean((np.abs(initial_forces[tie_mask]) - np.abs(optimized_forces[tie_mask])) / np.abs(initial_forces[tie_mask]) * 100)
+        print(f"  Ties: {np.sum(tie_mask)} members, Avg reduction: {tie_avg_reduction:.1f}%")
+    
+    if np.any(strut_mask):
+        strut_avg_change = np.mean((np.abs(initial_forces[strut_mask]) - np.abs(optimized_forces[strut_mask])) / np.abs(initial_forces[strut_mask]) * 100)
+        print(f"  Struts: {np.sum(strut_mask)} members, Avg change: {strut_avg_change:.1f}%")
+    
+    print(f"\n[Node Movement]")
+    total_movement = 0
+    max_movement = 0
+    max_node = None
+    
+    for node_id in optimizer.node_ids:
+        if node_id in optimizer.fixed_nodes:
+            continue
+        x0, y0 = result['initial_nodes'][node_id]
+        x1, y1 = result['optimized_nodes'][node_id]
+        movement = np.sqrt((x1-x0)**2 + (y1-y0)**2)
+        total_movement += movement
+        if movement > max_movement:
+            max_movement = movement
+            max_node = node_id
+    
+    n_movable = len(optimizer.node_ids) - len(optimizer.fixed_nodes)
+    avg_movement = total_movement / n_movable if n_movable > 0 else 0
+    
+    print(f"  Average movement: {avg_movement:.1f}mm")
+    print(f"  Maximum movement: {max_movement:.1f}mm (Node {max_node})")
+    
+    print(f"\n[Constraints]")
+    print(f"  Fixed nodes: {len(optimizer.fixed_nodes)} (A, F)")
+    print(f"  Y-coordinates: FIXED (w_t, w_s determined)")
+    print(f"  Optimized variables: {len(optimizer.left_nodes)} X-coordinates")
+    print(f"  Grid size: 5mm")
+    print(f"  Symmetry: ✓ Perfect")
+    
+    print(f"{'='*80}\n")

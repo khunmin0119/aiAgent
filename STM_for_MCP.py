@@ -53,8 +53,8 @@ class STMDesignChecker:
         self.b = beam_width
         self.h = beam_height
         self.L = beam_length
-        self.nodes: Dict[str, Node] = {}
-        self.members: Dict[str, Member] = {}
+        self.nodes: Dict[str, Node] = {} # str의 의미가 뭔지 파악 필요(코드상 dictonary의 key로 예상 Dict[str->key, node->value])
+        self.members: Dict[str, Member] = {} # 
         self.loads: List[Tuple[str, float, float]] = []
         self.supports: Dict[str, str] = {}
         self.reactions: Dict[str, Dict[str, float]] = {}
@@ -71,7 +71,7 @@ class STMDesignChecker:
         """Add node"""
         self.nodes[node.id] = node
         
-    def add_member(self, member: Member):
+    def add_member(self, member: Member): # 지도학습을 형성 가능한지 확인 필요할 듯 함
         """Add member"""
         self.members[member.id] = member
         
